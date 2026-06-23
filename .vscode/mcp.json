@@ -1,0 +1,8 @@
+{
+  "servers": {
+    "local-sample-mcp": {
+      "type": "sse",
+      "url": "http://localhost:8000/sse"
+    }
+  }
+}

@@ -1,0 +1,77 @@
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+
+
+# ------------------------------------------------
+
+# to activate env in the terminal -
+
+source .venv/bin/activate
+python sample-mcp-server.py
+
+# ----------------------------------------------------
+
+
+# Testing-
+
+cd /home/anjali/Downloads/AgenticIQ_bk/sample-mcp-server-script
+source .venv/bin/activate
+
+# Port open -
+
+curl -sS -o /dev/null -w "HTTP %{http_code}\n" -m 2 -N http://localhost:8000/sse
+
+# ---------------------------------------
+
+
+# Go to the mcp server folder
+# Terminal B — keep SSE stream open (do NOT close it)
+# Run the first curl to get the session id
+
+curl -N http://localhost:8000/sse
+
+SESSION_ID=<session-id>
+
+# Initialize
+curl -sS -o /dev/null -w "HTTP %{http_code}\n" \
+  -X POST "http://localhost:8000/messages/?session_id=$SESSION_ID" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc":"2.0","id":1,"method":"initialize",
+    "params":{
+      "protocolVersion":"2024-11-05",
+      "capabilities":{},
+      "clientInfo":{"name":"curl-test","version":"0.1"}
+    }
+  }'
+
+#-------------------------------------
+
+curl -sS -o /dev/null -w "HTTP %{http_code}\n" \
+  -X POST "http://localhost:8000/messages/?session_id=$SESSION_ID" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}'
+
+
+#-----------------------------------------------
+
+
+# List tools
+curl -sS -o /dev/null -w "HTTP %{http_code}\n" \
+  -X POST "http://localhost:8000/messages/?session_id=$SESSION_ID" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
+
+#---------------------------------------
+
+
+# Call echo
+curl -sS -o /dev/null -w "HTTP %{http_code}\n" \
+  -X POST "http://localhost:8000/messages/?session_id=$SESSION_ID" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc":"2.0","id":3,"method":"tools/call",
+    "params":{"name":"echo","arguments":{"message":"hello from curl"}}
+  }'
