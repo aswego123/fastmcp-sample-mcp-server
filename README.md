@@ -312,7 +312,4 @@ every pure tool, resource, and prompt by importing the server module directly.
 
   ## Demo Video
 
-https://github.com/user-attachments/assets/3dacf24b-3717-4b82-a036-e5ff4131bd09
-
-
-
+  https://github.com/user-attachments/assets/3dacf24b-3717-4b82-a036-e5ff4131bd09
