@@ -309,3 +309,10 @@ every pure tool, resource, and prompt by importing the server module directly.
   spaces are accepted (intentional safety restriction).
 
   ------------------------------------------------------------------------
+
+  ## Demo Video
+
+https://github.com/user-attachments/assets/3dacf24b-3717-4b82-a036-e5ff4131bd09
+
+
+
