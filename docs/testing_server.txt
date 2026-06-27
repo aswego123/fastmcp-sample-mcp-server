@@ -1,0 +1,41 @@
+How to use them
+
+## Terminal 1 (server, leave running):
+
+source .venv/bin/activate
+python -m server
+python -m server --log-level DEBUG --log-file data/mcp.log
+
+
+-------------------
+
+## Terminal 2 — CLI:
+
+source .venv/bin/activate
+
+# Discover what's there
+python -m clients.cli list
+
+# Run the built-in smoke suite (9 tools)
+python -m clients.cli smoke
+
+# Call individual tools
+python -m clients.cli call password_generate --args '{"length": 32, "use_symbols": true}'
+python -m clients.cli call hash_text         --args '{"text": "hello", "algorithm": "sha256"}'
+python -m clients.cli call weather           --args '{"latitude": 28.6139, "longitude": 77.2090}'
+
+# Try the new notes CRUD (data persists in data/notes.db)
+python -m clients.cli call note_add  --args '{"title": "groceries", "body": "milk, eggs"}'
+python -m clients.cli call note_add  --args '{"title": "todo",      "body": "deploy server"}'
+python -m clients.cli call note_list --args '{}'
+python -m clients.cli call note_get  --args '{"note_id": 1}'
+python -m clients.cli call note_update --args '{"note_id": 1, "body": "milk, eggs, bread"}'
+python -m clients.cli call note_delete --args '{"note_id": 2}'
+
+--------------------------
+
+## Terminal 2 — Streamlit UI:
+
+source .venv/bin/activate
+streamlit run clients/streamlit_app.py
+

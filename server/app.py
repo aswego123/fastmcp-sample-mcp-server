@@ -1,8 +1,11 @@
 from fastmcp import FastMCP
+import argparse
 import base64
 import datetime
 import hashlib
 import json
+import logging
+import os
 import random
 import re
 import secrets
@@ -12,12 +15,24 @@ from urllib.parse import urlparse
 
 import httpx
 
-mcp = FastMCP("Local MCP Server")
+from .notes_db import NotesDB
 
-# Shared HTTP client config used by network tools
+# Server config
+
+SERVER_NAME = "Local MCP Server"
+SERVER_VERSION = "0.3.0"
+SERVER_START_TIME = datetime.datetime.now(datetime.timezone.utc)
+
 _HTTP_TIMEOUT = 10.0
 _HTTP_MAX_BYTES = 200_000  # cap response bodies returned to the model
-_HTTP_USER_AGENT = "sample-mcp-server/0.2 (+https://modelcontextprotocol.io)"
+_HTTP_USER_AGENT = f"sample-mcp-server/{SERVER_VERSION} (+https://modelcontextprotocol.io)"
+
+NOTES_DB_PATH = os.environ.get("MCP_NOTES_DB", "data/notes.db")
+
+logger = logging.getLogger("mcp.server")
+
+mcp = FastMCP(SERVER_NAME)
+notes = NotesDB(NOTES_DB_PATH)
 
 @mcp.tool()
 def calculate(expression: str) -> str:
@@ -63,9 +78,7 @@ def echo(message: str) -> str:
     return f"[MCP Server Echo]: {message}"
 
 
-# ---------------------------------------------------------------------------
 # Encoding / hashing utilities
-# ---------------------------------------------------------------------------
 
 @mcp.tool()
 def hash_text(text: str, algorithm: str = "sha256") -> dict:
@@ -101,9 +114,7 @@ def base64_decode(data: str, url_safe: bool = False) -> str:
         return f"Error: invalid base64 input ({e})"
 
 
-# ---------------------------------------------------------------------------
 # Identifiers & secrets
-# ---------------------------------------------------------------------------
 
 @mcp.tool()
 def uuid_generate(count: int = 1, version: int = 4) -> dict:
@@ -161,9 +172,7 @@ def password_generate(
     return {"length": length, "password": "".join(pwd_chars)}
 
 
-# ---------------------------------------------------------------------------
 # JSON & regex helpers
-# ---------------------------------------------------------------------------
 
 @mcp.tool()
 def json_format(data: str, indent: int = 2, sort_keys: bool = False) -> str:
@@ -206,9 +215,7 @@ def regex_match(pattern: str, text: str, ignore_case: bool = False, multiline: b
     return {"pattern": pattern, "count": len(matches), "matches": matches}
 
 
-# ---------------------------------------------------------------------------
 # Unit conversion
-# ---------------------------------------------------------------------------
 
 # All length units in metres, all weight units in grams.
 _LENGTH_TO_M = {
@@ -266,9 +273,7 @@ def convert_units(value: float, from_unit: str, to_unit: str) -> dict:
     return {"error": f"Unsupported or mismatched units: '{from_unit}' -> '{to_unit}'"}
 
 
-# ---------------------------------------------------------------------------
 # Network tools
-# ---------------------------------------------------------------------------
 
 def _safe_url(url: str) -> tuple[bool, str]:
     """Allow only http(s) URLs with a hostname. Returns (ok, reason)."""
@@ -366,5 +371,167 @@ def weather(latitude: float, longitude: float) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Notes — stateful CRUD demo backed by SQLite (see notes_db.py)
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def note_add(title: str, body: str = "") -> dict:
+    """Create a new note. Returns the saved note including its id and timestamps."""
+    try:
+        return notes.add(title, body)
+    except ValueError as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+def note_list(limit: int = 50, search: str | None = None) -> dict:
+    """List recent notes (newest first). Optional case-insensitive substring search."""
+    items = notes.list(limit=limit, search=search)
+    return {"count": len(items), "total": notes.count(), "notes": items}
+
+
+@mcp.tool()
+def note_get(note_id: int) -> dict:
+    """Fetch a single note by id."""
+    note = notes.get(note_id)
+    return note if note else {"error": f"note {note_id} not found"}
+
+
+@mcp.tool()
+def note_update(note_id: int, title: str | None = None, body: str | None = None) -> dict:
+    """Update a note's title and/or body. At least one of title/body must be given."""
+    try:
+        updated = notes.update(note_id, title=title, body=body)
+    except ValueError as e:
+        return {"error": str(e)}
+    return updated if updated else {"error": f"note {note_id} not found"}
+
+
+@mcp.tool()
+def note_delete(note_id: int) -> dict:
+    """Delete a note by id."""
+    ok = notes.delete(note_id)
+    return {"deleted": ok, "id": note_id}
+
+
+# ---------------------------------------------------------------------------
+# MCP Resources — read-only data that clients can subscribe to or fetch.
+# ---------------------------------------------------------------------------
+
+@mcp.resource("resource://server/info")
+def resource_server_info() -> dict:
+    """Server metadata: name, version, uptime, and tool/resource/prompt counts."""
+    now = datetime.datetime.now(datetime.timezone.utc)
+    uptime = (now - SERVER_START_TIME).total_seconds()
+    return {
+        "name": SERVER_NAME,
+        "version": SERVER_VERSION,
+        "started_at": SERVER_START_TIME.isoformat(),
+        "uptime_seconds": round(uptime, 1),
+        "python": f"{__import__('sys').version_info.major}.{__import__('sys').version_info.minor}",
+        "notes_db_path": NOTES_DB_PATH,
+        "notes_count": notes.count(),
+    }
+
+
+@mcp.resource("resource://notes/all")
+def resource_notes_all() -> dict:
+    """All notes currently stored (newest first, max 500)."""
+    return {"notes": notes.list(limit=500)}
+
+
+@mcp.resource("resource://notes/{note_id}")
+def resource_note(note_id: str) -> dict:
+    """Fetch a single note as a resource (path: resource://notes/<id>)."""
+    try:
+        nid = int(note_id)
+    except ValueError:
+        return {"error": f"invalid note id: {note_id!r}"}
+    note = notes.get(nid)
+    return note if note else {"error": f"note {nid} not found"}
+
+
+# ---------------------------------------------------------------------------
+# MCP Prompts — reusable prompt templates clients can pick from a menu.
+# ---------------------------------------------------------------------------
+
+@mcp.prompt()
+def summarize_text(text: str, style: str = "concise") -> str:
+    """Ask the model to summarize a chunk of text in a chosen style."""
+    return (
+        f"Summarize the following text in a {style} style. "
+        "Preserve key facts, names, and numbers. Output plain prose only.\n\n"
+        f"---\n{text}\n---"
+    )
+
+
+@mcp.prompt()
+def code_review(code: str, language: str = "python") -> str:
+    """Ask the model for a structured code review of a snippet."""
+    return (
+        f"You are a senior {language} engineer. Review the following code.\n"
+        "Reply with three sections:\n"
+        "  1. **Bugs / correctness issues** (with line refs)\n"
+        "  2. **Security concerns** (OWASP-style)\n"
+        "  3. **Suggested improvements** (readability, performance, idiomatic style)\n\n"
+        f"```{language}\n{code}\n```"
+    )
+
+
+@mcp.prompt()
+def explain_error(error_message: str, context: str = "") -> str:
+    """Ask the model to explain an error message and suggest fixes."""
+    ctx = f"\nRelevant context:\n{context}\n" if context.strip() else ""
+    return (
+        "Explain the following error message in plain language, then list the most "
+        "likely causes and concrete steps to fix it.\n\n"
+        f"Error:\n{error_message}\n{ctx}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# CLI / entrypoint
+# ---------------------------------------------------------------------------
+
+def _build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(description=f"{SERVER_NAME} v{SERVER_VERSION}")
+    p.add_argument("--transport", choices=["sse", "stdio", "http"],
+                   default=os.environ.get("MCP_TRANSPORT", "sse"),
+                   help="Transport to expose (default: sse).")
+    p.add_argument("--host", default=os.environ.get("MCP_HOST", "0.0.0.0"),
+                   help="Bind host for sse/http transports (default: 0.0.0.0).")
+    p.add_argument("--port", type=int, default=int(os.environ.get("MCP_PORT", "8000")),
+                   help="Bind port for sse/http transports (default: 8000).")
+    p.add_argument("--log-level", default=os.environ.get("MCP_LOG_LEVEL", "INFO"),
+                   choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+                   help="Logging verbosity (default: INFO).")
+    p.add_argument("--log-file", default=os.environ.get("MCP_LOG_FILE"),
+                   help="Optional path to also write logs to a file.")
+    p.add_argument("--version", action="version", version=f"%(prog)s {SERVER_VERSION}")
+    return p
+
+
+def _configure_logging(level: str, log_file: str | None) -> None:
+    fmt = "%(asctime)s %(levelname)-5s %(name)s | %(message)s"
+    handlers: list[logging.Handler] = [logging.StreamHandler()]
+    if log_file:
+        handlers.append(logging.FileHandler(log_file))
+    logging.basicConfig(level=level, format=fmt, handlers=handlers, force=True)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _build_parser().parse_args(argv)
+    _configure_logging(args.log_level, args.log_file)
+    logger.info("starting %s v%s transport=%s", SERVER_NAME, SERVER_VERSION, args.transport)
+    logger.info("notes_db=%s notes_count=%d", NOTES_DB_PATH, notes.count())
+
+    if args.transport == "stdio":
+        mcp.run(transport="stdio")
+    else:
+        mcp.run(transport=args.transport, host=args.host, port=args.port)
+    return 0
+
+
 if __name__ == "__main__":
-    mcp.run(transport="sse", host="0.0.0.0", port=8000)
+    raise SystemExit(main())

@@ -3,15 +3,15 @@
 Examples:
 
     # List all tools the server exposes
-    python client_test.py list
+    python -m clients.cli list
 
     # Call a tool with JSON-encoded arguments
-    python client_test.py call echo --args '{"message": "hi"}'
-    python client_test.py call password_generate --args '{"length": 32}'
-    python client_test.py call weather --args '{"latitude": 28.6139, "longitude": 77.2090}'
+    python -m clients.cli call echo --args '{"message": "hi"}'
+    python -m clients.cli call password_generate --args '{"length": 32}'
+    python -m clients.cli call weather --args '{"latitude": 28.6139, "longitude": 77.2090}'
 
     # Run a quick smoke test that exercises a handful of tools
-    python client_test.py smoke
+    python -m clients.cli smoke
 """
 
 from __future__ import annotations

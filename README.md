@@ -10,14 +10,26 @@ Desktop, or any custom agent.
 
 ```
 sample-mcp-server-script/
+├── server/                  # The MCP server
+│   ├── __init__.py
+│   ├── __main__.py          # enables `python -m server`
+│   ├── app.py               # FastMCP app + tools + resources + prompts
+│   └── notes_db.py          # SQLite-backed notes store
+├── clients/                 # Ways to talk to the server
+│   ├── cli.py               # CLI: list / call / smoke
+│   └── streamlit_app.py     # Streamlit UI
+├── tests/                   # pytest suite
+│   ├── test_notes_db.py
+│   └── test_server.py
+├── docs/                    # Misc notes
+│   ├── instructions.txt
+│   └── testing_server.txt
+├── data/                    # Local SQLite DB + logs (gitignored)
+├── Dockerfile
+├── .dockerignore
 ├── .gitignore
-├── .vscode/
-│   └── mcp.json            # Example VS Code MCP client config
 ├── README.md
-├── client_test.py          # Tiny CLI test harness (list / call / smoke)
-├── streamlit_client.py     # Streamlit UI for poking at any tool
-├── requirements.txt        # Python dependencies
-└── sample-mcp-server.py    # The MCP server entrypoint
+└── requirements.txt
 ```
 
 ## Tools exposed
@@ -39,6 +51,27 @@ sample-mcp-server-script/
 | `convert_units`     | Convert length / weight / temperature between common units.              |
 | `fetch_url`         | HTTP GET/HEAD an http(s) URL and return status, headers, truncated body. |
 | `weather`           | Current weather for a lat/lon via the free Open-Meteo API (no key).      |
+| `note_add`          | Create a new note (title + body) in the local SQLite store.              |
+| `note_list`         | List recent notes, newest first. Optional substring search.              |
+| `note_get`          | Fetch a single note by id.                                               |
+| `note_update`       | Update a note's title and/or body.                                       |
+| `note_delete`       | Delete a note by id.                                                     |
+
+## Resources exposed
+
+| URI                          | Description                                              |
+| ---------------------------- | -------------------------------------------------------- |
+| `resource://server/info`     | Server metadata: name, version, uptime, notes count.     |
+| `resource://notes/all`       | All notes (max 500), newest first.                       |
+| `resource://notes/{note_id}` | A single note by id, e.g. `resource://notes/3`.          |
+
+## Prompts exposed
+
+| Prompt           | Description                                                  |
+| ---------------- | ------------------------------------------------------------ |
+| `summarize_text` | Summarize a text blob in a chosen style.                     |
+| `code_review`    | Structured code review (bugs / security / improvements).     |
+| `explain_error`  | Plain-language explanation of an error + likely fixes.       |
 
 ## Prerequisites
 
@@ -63,7 +96,7 @@ pip install -r requirements.txt
 
 ```bash
 # With the venv activated:
-python sample-mcp-server.py
+python -m server
 ```
 
 You should see FastMCP start an SSE server on port `8000`. The SSE endpoint is:
@@ -73,6 +106,20 @@ http://localhost:8000/sse
 ```
 
 Leave this terminal running while you use the server from a client.
+
+### CLI flags
+
+```bash
+python -m server --help
+
+# Examples
+python -m server --transport stdio
+python -m server --transport sse --host 127.0.0.1 --port 9000
+python -m server --log-level DEBUG --log-file data/mcp.log
+```
+
+All flags can also be set via environment variables: `MCP_TRANSPORT`, `MCP_HOST`,
+`MCP_PORT`, `MCP_LOG_LEVEL`, `MCP_LOG_FILE`, `MCP_NOTES_DB`.
 
 ## Verify it's running
 
@@ -89,34 +136,34 @@ and stays open, the server is healthy.
 
 Two convenient clients are included.
 
-### 1. CLI harness — `client_test.py`
+### 1. CLI harness — `clients/cli.py`
 
 ```bash
 source .venv/bin/activate
 
 # List every tool the server exposes
-python client_test.py list
+python -m clients.cli list
 
 # Call any tool (arguments are a JSON object)
-python client_test.py call echo --args '{"message": "hello"}'
-python client_test.py call password_generate --args '{"length": 32, "use_symbols": true}'
-python client_test.py call weather --args '{"latitude": 28.6139, "longitude": 77.2090}'
+python -m clients.cli call echo --args '{"message": "hello"}'
+python -m clients.cli call password_generate --args '{"length": 32, "use_symbols": true}'
+python -m clients.cli call weather --args '{"latitude": 28.6139, "longitude": 77.2090}'
 
 # Run a small predefined smoke suite that exercises ~9 tools
-python client_test.py smoke
+python -m clients.cli smoke
 
 # Point at a non-default URL
-python client_test.py --url http://localhost:9000/sse list
+python -m clients.cli --url http://localhost:9000/sse list
 ```
 
-### 2. Streamlit UI — `streamlit_client.py`
+### 2. Streamlit UI — `clients/streamlit_app.py`
 
 A zero-config web UI that lists tools, auto-renders a form from each tool's
 input schema, and shows results + call history.
 
 ```bash
 source .venv/bin/activate
-streamlit run streamlit_client.py
+streamlit run clients/streamlit_app.py
 ```
 
 Streamlit opens at <http://localhost:8501>. In the sidebar, click
@@ -126,8 +173,8 @@ pick a tool from the dropdown, fill in the form, hit **Call tool**.
 ### 3. Raw curl flow (advanced)
 
 If you want to test the JSON-RPC wire protocol directly, see
-[instructions.txt](instructions.txt) for the manual SSE + `/messages/?session_id=…`
-flow.
+[docs/instructions.txt](docs/instructions.txt) for the manual SSE +
+`/messages/?session_id=…` flow.
 
 ## Use it from VS Code Copilot Chat
 
@@ -146,7 +193,7 @@ A ready-to-use config is included at [.vscode/mcp.json](.vscode/mcp.json):
 
 Steps:
 
-1. Make sure the server is running (`python sample-mcp-server.py`).
+1. Make sure the server is running (`python -m server`).
 2. Open this folder in VS Code.
 3. Open Copilot Chat and switch to **Agent** mode.
 4. Click the tools picker — the `local-sample-mcp` server and its tools should appear.
@@ -174,17 +221,10 @@ Then start the Python server in a terminal as shown above.
 
 ## Switching to stdio transport (optional)
 
-If you prefer running over stdio (no port needed), change the last line of
-[sample-mcp-server.py](sample-mcp-server.py) from:
+If you prefer running over stdio (no port needed):
 
-```python
-mcp.run(transport="sse", host="0.0.0.0", port=8000)
-```
-
-to:
-
-```python
-mcp.run(transport="stdio")
+```bash
+python -m server --transport stdio
 ```
 
 And update your client config to launch the script directly, e.g.:
@@ -195,18 +235,46 @@ And update your client config to launch the script directly, e.g.:
     "local-sample-mcp": {
       "type": "stdio",
       "command": "python",
-      "args": ["/absolute/path/to/sample-mcp-server.py"]
+      "args": ["-m", "server"],
+      "cwd": "/absolute/path/to/sample-mcp-server-script"
     }
   }
 }
 ```
+
+## Run with Docker
+
+```bash
+# Build the image
+docker build -t sample-mcp-server .
+
+# Run with a persistent notes DB volume
+docker run --rm -p 8000:8000 -v "$PWD/data:/data" sample-mcp-server
+
+# Override transport/host/port/log-level via env or CLI args
+docker run --rm -p 9000:9000 -e MCP_PORT=9000 sample-mcp-server
+docker run --rm sample-mcp-server --transport stdio
+```
+
+The image exposes port `8000` and stores the notes DB at `/data/notes.db` (mount a
+volume there to persist it across container restarts).
+
+## Run the tests
+
+```bash
+source .venv/bin/activate
+pytest -q
+```
+
+`tests/test_notes_db.py` covers the SQLite store and `tests/test_server.py` covers
+every pure tool, resource, and prompt by importing the server module directly.
 
 ## Troubleshooting
 
 - **`ModuleNotFoundError: No module named 'fastmcp'`** — activate the venv and rerun
   `pip install -r requirements.txt`.
 - **Port 8000 already in use** — change the `port=8000` argument in
-  `sample-mcp-server.py`, and update the `url` in `.vscode/mcp.json` to match.
+  `server/app.py`, and update the `url` in `.vscode/mcp.json` to match.
 - **VS Code doesn't see the server** — restart the MCP server from the Copilot Chat
   tools picker, or reload the VS Code window.
 - **`calculate` returns an error** — only `0-9`, `+`, `-`, `*`, `/`, `(`, `)`, `.`, and

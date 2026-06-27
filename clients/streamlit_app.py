@@ -1,7 +1,7 @@
 """Streamlit UI for the local MCP server.
 
 Run with:
-    streamlit run streamlit_client.py
+    streamlit run clients/streamlit_app.py
 
 It connects to the MCP server (default: http://localhost:8000/sse), lists the
 available tools, and renders a dynamic form based on each tool's JSON input
