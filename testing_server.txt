@@ -1,0 +1,24 @@
+How to use them
+
+Terminal 1 (server, leave running):
+
+source .venv/bin/activate
+python sample-mcp-server.py
+
+-------------------
+
+Terminal 2 — CLI:
+
+source .venv/bin/activate
+python client_test.py list
+python client_test.py smoke
+python client_test.py call password_generate --args '{"length": 32, "use_symbols": true}'
+python client_test.py call weather --args '{"latitude": 28.6139, "longitude": 77.2090}'
+
+--------------------------
+
+Terminal 2 — Streamlit UI:
+
+source .venv/bin/activate
+streamlit run streamlit_client.py
+

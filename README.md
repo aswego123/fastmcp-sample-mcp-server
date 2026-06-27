@@ -14,7 +14,9 @@ sample-mcp-server-script/
 ├── .vscode/
 │   └── mcp.json            # Example VS Code MCP client config
 ├── README.md
-├── requirements.txt        # Python dependencies (fastmcp)
+├── client_test.py          # Tiny CLI test harness (list / call / smoke)
+├── streamlit_client.py     # Streamlit UI for poking at any tool
+├── requirements.txt        # Python dependencies
 └── sample-mcp-server.py    # The MCP server entrypoint
 ```
 
@@ -82,6 +84,50 @@ curl -N http://localhost:8000/sse
 
 You should get a streaming response (press `Ctrl+C` to stop). If the connection opens
 and stays open, the server is healthy.
+
+## Test from the terminal
+
+Two convenient clients are included.
+
+### 1. CLI harness — `client_test.py`
+
+```bash
+source .venv/bin/activate
+
+# List every tool the server exposes
+python client_test.py list
+
+# Call any tool (arguments are a JSON object)
+python client_test.py call echo --args '{"message": "hello"}'
+python client_test.py call password_generate --args '{"length": 32, "use_symbols": true}'
+python client_test.py call weather --args '{"latitude": 28.6139, "longitude": 77.2090}'
+
+# Run a small predefined smoke suite that exercises ~9 tools
+python client_test.py smoke
+
+# Point at a non-default URL
+python client_test.py --url http://localhost:9000/sse list
+```
+
+### 2. Streamlit UI — `streamlit_client.py`
+
+A zero-config web UI that lists tools, auto-renders a form from each tool's
+input schema, and shows results + call history.
+
+```bash
+source .venv/bin/activate
+streamlit run streamlit_client.py
+```
+
+Streamlit opens at <http://localhost:8501>. In the sidebar, click
+**Connect / Refresh** to load tools from `http://localhost:8000/sse` (editable),
+pick a tool from the dropdown, fill in the form, hit **Call tool**.
+
+### 3. Raw curl flow (advanced)
+
+If you want to test the JSON-RPC wire protocol directly, see
+[instructions.txt](instructions.txt) for the manual SSE + `/messages/?session_id=…`
+flow.
 
 ## Use it from VS Code Copilot Chat
 
