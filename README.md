@@ -107,27 +107,33 @@ http://localhost:8000/sse
 
 Leave this terminal running while you use the server from a client.
 
-------------------------------------
+---
 
-  ## To the point commands for testing -
+## Quick-start cheat sheet
 
-  How to use the tool -
+Three terminals, all from the project root after `source .venv/bin/activate`.
 
-  ## Terminal 1 (server, leave running):
+**Terminal 1 — start the server**
+```bash
+python -m server
+# or with debug logging to a file
+python -m server --log-level DEBUG --log-file data/mcp.log
+```
 
-  source .venv/bin/activate
-  python -m server
-  python -m server --log-level DEBUG --log-file data/mcp.log
+**Terminal 2 — Streamlit UI**
+```bash
+streamlit run clients/streamlit_app.py
+# opens http://localhost:8501
+```
 
-  --------------------------
+**Terminal 3 — CLI client**
+```bash
+python -m clients.cli list                    # discover tools
+python -m clients.cli smoke                   # run the built-in smoke suite
+python -m clients.cli call echo --args '{"message":"hi"}'
+```
 
-  ## Terminal 2 — Streamlit UI:
-
-  source .venv/bin/activate
-  streamlit run clients/streamlit_app.py
-
-  --------------------------------------------
-
+---
 
 ### CLI flags
 
