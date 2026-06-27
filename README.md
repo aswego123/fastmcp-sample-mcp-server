@@ -107,6 +107,28 @@ http://localhost:8000/sse
 
 Leave this terminal running while you use the server from a client.
 
+------------------------------------
+
+  ## To the point commands for testing -
+
+  How to use the tool -
+
+  ## Terminal 1 (server, leave running):
+
+  source .venv/bin/activate
+  python -m server
+  python -m server --log-level DEBUG --log-file data/mcp.log
+
+  --------------------------
+
+  ## Terminal 2 — Streamlit UI:
+
+  source .venv/bin/activate
+  streamlit run clients/streamlit_app.py
+
+  --------------------------------------------
+
+
 ### CLI flags
 
 ```bash
@@ -279,8 +301,5 @@ every pure tool, resource, and prompt by importing the server module directly.
   tools picker, or reload the VS Code window.
 - **`calculate` returns an error** — only `0-9`, `+`, `-`, `*`, `/`, `(`, `)`, `.`, and
   spaces are accepted (intentional safety restriction).
-
-
-
 
   ------------------------------------------------------------------------
