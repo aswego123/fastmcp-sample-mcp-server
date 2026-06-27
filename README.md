@@ -20,13 +20,23 @@ sample-mcp-server-script/
 
 ## Tools exposed
 
-| Tool             | Description                                              |
-| ---------------- | -------------------------------------------------------- |
-| `calculate`      | Evaluate a safe math expression, e.g. `2 + 2 * 10`.      |
-| `get_server_time`| Return the current server time (UTC).                    |
-| `random_number`  | Random int between `min_val` and `max_val`.              |
-| `analyze_text`   | Word / character / sentence stats for a text blob.       |
-| `echo`           | Echoes a message back — handy for connectivity testing.  |
+| Tool                | Description                                                              |
+| ------------------- | ------------------------------------------------------------------------ |
+| `calculate`         | Evaluate a safe math expression, e.g. `2 + 2 * 10`.                      |
+| `get_server_time`   | Return the current server time (UTC).                                    |
+| `random_number`     | Random int between `min_val` and `max_val`.                              |
+| `analyze_text`      | Word / character / sentence stats for a text blob.                       |
+| `echo`              | Echoes a message back — handy for connectivity testing.                  |
+| `hash_text`         | MD5/SHA1/SHA256/SHA512 hash of a string.                                 |
+| `base64_encode`     | Base64-encode a string (standard or URL-safe alphabet).                  |
+| `base64_decode`     | Decode a base64 string back to UTF-8 text.                               |
+| `uuid_generate`     | Generate one or more UUIDs (v1 or v4).                                   |
+| `password_generate` | Cryptographically strong random password with configurable charset.      |
+| `json_format`       | Pretty-print and validate a JSON string.                                 |
+| `regex_match`       | Find all matches of a regex pattern in text (first 50, with groups).     |
+| `convert_units`     | Convert length / weight / temperature between common units.              |
+| `fetch_url`         | HTTP GET/HEAD an http(s) URL and return status, headers, truncated body. |
+| `weather`           | Current weather for a lat/lon via the free Open-Meteo API (no key).      |
 
 ## Prerequisites
 
@@ -156,6 +166,7 @@ And update your client config to launch the script directly, e.g.:
 - **`calculate` returns an error** — only `0-9`, `+`, `-`, `*`, `/`, `(`, `)`, `.`, and
   spaces are accepted (intentional safety restriction).
 
-## License
 
-Sample / demo code — use freely.
+
+
+  ------------------------------------------------------------------------
