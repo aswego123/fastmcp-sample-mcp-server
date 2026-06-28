@@ -1,10 +1,29 @@
 # Sample Local MCP Server
 
-A minimal [Model Context Protocol](https://modelcontextprotocol.io/) server built with
-[FastMCP](https://github.com/jlowin/fastmcp). It exposes a handful of demo tools (math,
-random number, server time, text analysis, echo) over **SSE** on `http://localhost:8000`,
-so you can wire it into an MCP-aware client such as VS Code Copilot Chat, Claude
-Desktop, or any custom agent.
+[![PyPI version](https://img.shields.io/pypi/v/fastmcp-sample-server.svg)](https://pypi.org/project/fastmcp-sample-server/)
+[![Python versions](https://img.shields.io/pypi/pyversions/fastmcp-sample-server.svg)](https://pypi.org/project/fastmcp-sample-server/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-82%20passing-brightgreen.svg)](#run-the-tests)
+
+A demo [Model Context Protocol](https://modelcontextprotocol.io/) server built on
+[FastMCP](https://github.com/jlowin/fastmcp). It ships **20 tools, 5 resources, 3 prompts**,
+a SQLite-backed notes store, per-call telemetry with a Plotly Streamlit dashboard,
+and a CLI client. It exposes itself over **SSE** on `http://localhost:8000` by default
+(also stdio and HTTP), so you can wire it into any MCP-aware client such as VS Code
+Copilot Chat, Claude Desktop, or a custom agent.
+
+## Install
+
+```bash
+# From PyPI (recommended)
+pip install fastmcp-sample-server          # server + CLI
+pip install "fastmcp-sample-server[ui]"    # + Streamlit dashboard
+
+sample-mcp-server                          # start the SSE server on :8000
+sample-mcp-client smoke                    # run a built-in smoke suite
+```
+
+Or clone the repo if you want to hack on it — see [Setup](#setup) below.
 
 ## Project structure
 
@@ -13,21 +32,23 @@ sample-mcp-server-script/
 ├── server/                  # The MCP server
 │   ├── __init__.py
 │   ├── __main__.py          # enables `python -m server`
-│   ├── app.py               # FastMCP app + tools + resources + prompts
-│   └── notes_db.py          # SQLite-backed notes store
+│   ├── app.py               # FastMCP app + tools + resources + prompts + CLI
+│   ├── notes_db.py          # SQLite-backed notes store
+│   ├── safety.py            # SSRF / ReDoS / safe-eval guardrails
+│   └── telemetry.py         # @traced decorator + telemetry SQLite store
 ├── clients/                 # Ways to talk to the server
 │   ├── cli.py               # CLI: list / call / smoke
-│   └── streamlit_app.py     # Streamlit UI
-├── tests/                   # pytest suite
+│   └── streamlit_app.py     # Streamlit UI with Telemetry tab
+├── tests/                   # pytest suite (82 tests)
 │   ├── test_notes_db.py
-│   └── test_server.py
+│   ├── test_safety.py
+│   ├── test_server.py
+│   └── test_telemetry.py
 ├── docs/                    # Misc notes
-│   ├── instructions.txt
-│   └── testing_server.txt
 ├── data/                    # Local SQLite DB + logs (gitignored)
 ├── Dockerfile
-├── .dockerignore
-├── .gitignore
+├── pyproject.toml           # PEP 621 metadata, hatchling backend
+├── LICENSE                  # MIT
 ├── README.md
 └── requirements.txt
 ```
@@ -393,22 +414,38 @@ source .venv/bin/activate
 pytest -q
 ```
 
-`tests/test_notes_db.py` covers the SQLite store and `tests/test_server.py` covers
-every pure tool, resource, and prompt by importing the server module directly.
+The suite (82 tests) covers:
+
+- [test_notes_db.py](tests/test_notes_db.py) — SQLite notes CRUD + validation.
+- [test_server.py](tests/test_server.py) — every pure tool, resource, and prompt
+  by importing the server module directly.
+- [test_safety.py](tests/test_safety.py) — the guardrails: `safe_eval_math`,
+  SSRF blocklist, timeout helper, and input-cap behaviour.
+- [test_telemetry.py](tests/test_telemetry.py) — `TelemetryDB`, percentiles,
+  slowest/recent-errors queries, and the `@traced` decorator.
 
 ## Troubleshooting
 
 - **`ModuleNotFoundError: No module named 'fastmcp'`** — activate the venv and rerun
-  `pip install -r requirements.txt`.
-- **Port 8000 already in use** — change the `port=8000` argument in
-  `server/app.py`, and update the `url` in `.vscode/mcp.json` to match.
+  `pip install -r requirements.txt` (or `pip install fastmcp-sample-server`).
+- **Port 8000 already in use** — pass `--port 9000` to `sample-mcp-server`
+  (or set `MCP_PORT=9000`), and update the `url` in `.vscode/mcp.json` to match.
 - **VS Code doesn't see the server** — restart the MCP server from the Copilot Chat
   tools picker, or reload the VS Code window.
-- **`calculate` returns an error** — only `0-9`, `+`, `-`, `*`, `/`, `(`, `)`, `.`, and
-  spaces are accepted (intentional safety restriction).
+- **`calculate` returns an error** — only arithmetic is allowed (`+ - * / // % **`,
+  parentheses, unary `+/-`, numeric literals). Names, function calls, and attribute
+  access are rejected by the AST evaluator. Exponent must be ≤100, expression ≤200
+  chars. See [Guardrails](#guardrails).
+- **`fetch_url` rejects my URL** — the SSRF guard refuses any host that resolves to
+  a loopback / private / link-local / multicast / reserved IP. Only `http(s)://`
+  public hosts are allowed.
 
   ------------------------------------------------------------------------
 
   ## Demo Video
 
   https://github.com/user-attachments/assets/3dacf24b-3717-4b82-a036-e5ff4131bd09
+
+## License
+
+[MIT](LICENSE) © 2026 anjalikakkar
