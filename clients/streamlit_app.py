@@ -415,34 +415,31 @@ with tab_telemetry:
         else:
             st.info("No tool calls recorded yet.")
 
-        # Slowest calls + recent errors side-by-side
-        sl_col, err_col = st.columns(2)
-        with sl_col:
-            st.markdown("**🐢 Slowest calls — last 24 h**")
-            if slowest:
-                st.dataframe(
-                    [
-                        {"ts": r["ts"], "tool": r["tool"], "ms": round(r["duration_ms"], 1), "status": r["status"]}
-                        for r in slowest
-                    ],
-                    use_container_width=True,
-                    hide_index=True,
-                )
-            else:
-                st.caption("No data yet.")
-        with err_col:
-            st.markdown("**❌ Recent errors**")
-            if errors_list:
-                st.dataframe(
-                    [
-                        {"ts": r["ts"], "tool": r["tool"], "ms": round(r["duration_ms"], 1), "error": r["error"]}
-                        for r in errors_list
-                    ],
-                    use_container_width=True,
-                    hide_index=True,
-                )
-            else:
-                st.caption("No errors recorded. 🎉")
+        # Slowest calls + recent errors side-by-side (hidden when both empty)
+        if slowest or errors_list:
+            sl_col, err_col = st.columns(2)
+            with sl_col:
+                if slowest:
+                    st.markdown("**🐢 Slowest calls — last 24 h**")
+                    st.dataframe(
+                        [
+                            {"ts": r["ts"], "tool": r["tool"], "ms": round(r["duration_ms"], 1), "status": r["status"]}
+                            for r in slowest
+                        ],
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+            with err_col:
+                if errors_list:
+                    st.markdown("**❌ Recent errors**")
+                    st.dataframe(
+                        [
+                            {"ts": r["ts"], "tool": r["tool"], "ms": round(r["duration_ms"], 1), "error": r["error"]}
+                            for r in errors_list
+                        ],
+                        use_container_width=True,
+                        hide_index=True,
+                    )
 
         # Latency over time
         if recent:
