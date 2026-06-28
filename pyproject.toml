@@ -1,0 +1,82 @@
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
+[project]
+name = "fastmcp-sample-server"
+dynamic = ["version"]
+description = "A demo Model Context Protocol (MCP) server built on FastMCP — 15 tools, 5 resources, 3 prompts, SQLite-backed notes, per-call telemetry, and a Streamlit UI."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [
+    { name = "anjalikakkar", email = "anjalikakkar@users.noreply.github.com" },
+]
+keywords = ["mcp", "fastmcp", "model-context-protocol", "llm", "agents", "sse"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "fastmcp>=0.2.0",
+    "httpx>=0.27.0",
+]
+
+[project.optional-dependencies]
+ui = [
+    "streamlit>=1.30.0",
+    "streamlit-autorefresh>=1.0.1",
+    "plotly>=5.18.0",
+]
+dev = [
+    "pytest>=8.0.0",
+    "build>=1.0.0",
+    "twine>=5.0.0",
+]
+
+[project.scripts]
+sample-mcp-server = "server.app:main"
+sample-mcp-client = "clients.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/aswego123/fastmcp-sample-mcp-server"
+Repository = "https://github.com/aswego123/fastmcp-sample-mcp-server"
+Issues = "https://github.com/aswego123/fastmcp-sample-mcp-server/issues"
+
+# ---------------------------------------------------------------------------
+# Hatch build config — pull version from server/app.py, package server/ + clients/
+# ---------------------------------------------------------------------------
+
+[tool.hatch.version]
+path = "server/app.py"
+pattern = "SERVER_VERSION\\s*=\\s*\"(?P<version>[^\"]+)\""
+
+[tool.hatch.build.targets.wheel]
+packages = ["server", "clients"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/server",
+    "/clients",
+    "/tests",
+    "/docs",
+    "/README.md",
+    "/LICENSE",
+    "/requirements.txt",
+    "/Dockerfile",
+]
+exclude = [
+    "/data",
+    "**/*.db",
+    "**/*.log",
+    "**/__pycache__",
+]

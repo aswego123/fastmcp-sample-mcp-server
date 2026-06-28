@@ -94,6 +94,51 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
+### Install from a built wheel
+
+The repo ships a [pyproject.toml](pyproject.toml) so you can `pip install` it
+like any other package. Two console scripts get registered:
+
+| Command              | Equivalent to                          |
+| -------------------- | -------------------------------------- |
+| `sample-mcp-server`  | `python -m server`                     |
+| `sample-mcp-client`  | `python -m clients.cli`                |
+
+```bash
+# Build sdist + wheel into ./dist/
+pip install build twine
+python -m build
+
+# Install the wheel locally
+pip install dist/fastmcp_sample_server-*.whl
+
+# Or install with the Streamlit UI extras
+pip install "dist/fastmcp_sample_server-*.whl[ui]"
+
+# Or with dev tools (pytest, build, twine)
+pip install -e ".[ui,dev]"
+```
+
+### Publish to PyPI
+
+Once you're happy with a release:
+
+```bash
+# Sanity-check the artifacts
+twine check dist/*
+
+# Upload to TestPyPI first (recommended)
+twine upload --repository testpypi dist/*
+
+# Then the real index
+twine upload dist/*
+```
+
+Use an [API token](https://pypi.org/help/#apitoken) (`__token__` as the
+username, the `pypi-...` token as the password). The version is read from
+`SERVER_VERSION` in [server/app.py](server/app.py) — bump it before each
+upload (PyPI doesn't allow re-uploading the same version).
+
 ## Run the server
 
 ```bash
