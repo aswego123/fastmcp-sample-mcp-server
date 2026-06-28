@@ -24,6 +24,9 @@ CREATE TABLE IF NOT EXISTS notes (
 CREATE INDEX IF NOT EXISTS idx_notes_updated_at ON notes(updated_at DESC);
 """
 
+MAX_TITLE_LEN = 200
+MAX_BODY_LEN = 100_000  # 100 KB
+
 
 def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -60,9 +63,23 @@ class NotesDB:
             "updated_at": row["updated_at"],
         }
 
+    @staticmethod
+    def _validate_fields(title: str, body: str) -> tuple[str, str]:
+        if not isinstance(title, str) or not title.strip():
+            raise ValueError("title must be a non-empty string")
+        stripped = title.strip()
+        if len(stripped) > MAX_TITLE_LEN:
+            raise ValueError(f"title too long (max {MAX_TITLE_LEN} chars)")
+        if body is None:
+            body = ""
+        if not isinstance(body, str):
+            raise ValueError("body must be a string")
+        if len(body) > MAX_BODY_LEN:
+            raise ValueError(f"body too long (max {MAX_BODY_LEN} chars)")
+        return stripped, body
+
     def add(self, title: str, body: str = "") -> dict:
-        if not title or not title.strip():
-            raise ValueError("title must not be empty")
+        title, body = self._validate_fields(title, body)
         now = _utcnow_iso()
         with self._lock, self._connect() as conn:
             cur = conn.execute(
@@ -99,8 +116,10 @@ class NotesDB:
     def update(self, note_id: int, title: str | None = None, body: str | None = None) -> dict | None:
         if title is None and body is None:
             raise ValueError("at least one of title or body must be provided")
-        if title is not None and not title.strip():
-            raise ValueError("title must not be empty")
+        if title is not None:
+            title, _ = self._validate_fields(title, "")
+        if body is not None and len(body) > MAX_BODY_LEN:
+            raise ValueError(f"body too long (max {MAX_BODY_LEN} chars)")
         with self._lock, self._connect() as conn:
             existing = conn.execute("SELECT * FROM notes WHERE id = ?", (int(note_id),)).fetchone()
             if not existing:

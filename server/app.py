@@ -11,11 +11,17 @@ import re
 import secrets
 import string
 import uuid
-from urllib.parse import urlparse
 
 import httpx
 
 from .notes_db import NotesDB
+from .safety import (
+    MathError,
+    TimeoutExceeded,
+    check_url_is_public,
+    run_with_timeout,
+    safe_eval_math,
+)
 
 # Server config
 
@@ -36,16 +42,16 @@ notes = NotesDB(NOTES_DB_PATH)
 
 @mcp.tool()
 def calculate(expression: str) -> str:
-    """Evaluate a safe math expression. Example: '2 + 2 * 10'"""
-    try:
-        allowed = set("0123456789+-*/(). ")
-        if not all(c in allowed for c in expression):
-            return "Error: Only basic math operators allowed."
-        result = eval(expression, {"__builtins__": {}})
-        return f"{expression} = {result}"
-    except Exception as e:
-        return f"Error: {e}"
+    """Evaluate a safe math expression. Example: '2 + 2 * 10'
 
+    Allowed: + - * / // % ** , parentheses, unary +/-, numeric literals.
+    No names, calls, or attribute access. Exponents above 100 are rejected.
+    """
+    try:
+        result = safe_eval_math(expression)
+    except MathError as e:
+        return f"Error: {e}"
+    return f"{expression} = {result}"
 @mcp.tool()
 def get_server_time() -> str:
     """Returns the current server date and time."""
@@ -191,7 +197,13 @@ def regex_match(pattern: str, text: str, ignore_case: bool = False, multiline: b
     """Find all matches of a regex pattern in text.
 
     Returns the first 50 matches along with their start/end offsets and any groups.
+    Inputs are capped (pattern <=1 KB, text <=1 MB) and execution is bounded by
+    a 2 second timeout to defuse catastrophic backtracking.
     """
+    if len(pattern) > 1024:
+        return {"error": "pattern too long (max 1024 chars)"}
+    if len(text) > 1_000_000:
+        return {"error": "text too long (max 1,000,000 chars)"}
     flags = 0
     if ignore_case:
         flags |= re.IGNORECASE
@@ -202,16 +214,23 @@ def regex_match(pattern: str, text: str, ignore_case: bool = False, multiline: b
     except re.error as e:
         return {"error": f"invalid regex: {e}"}
 
-    matches = []
-    for m in compiled.finditer(text):
-        matches.append({
-            "match": m.group(0),
-            "start": m.start(),
-            "end": m.end(),
-            "groups": list(m.groups()),
-        })
-        if len(matches) >= 50:
-            break
+    def _find_all() -> list[dict]:
+        out: list[dict] = []
+        for m in compiled.finditer(text):
+            out.append({
+                "match": m.group(0),
+                "start": m.start(),
+                "end": m.end(),
+                "groups": list(m.groups()),
+            })
+            if len(out) >= 50:
+                break
+        return out
+
+    try:
+        matches = run_with_timeout(_find_all, timeout=2.0)
+    except TimeoutExceeded:
+        return {"error": "regex took too long (>2s) — possible catastrophic backtracking"}
     return {"pattern": pattern, "count": len(matches), "matches": matches}
 
 
@@ -275,31 +294,21 @@ def convert_units(value: float, from_unit: str, to_unit: str) -> dict:
 
 # Network tools
 
-def _safe_url(url: str) -> tuple[bool, str]:
-    """Allow only http(s) URLs with a hostname. Returns (ok, reason)."""
-    try:
-        parsed = urlparse(url)
-    except ValueError as e:
-        return False, f"could not parse URL: {e}"
-    if parsed.scheme not in {"http", "https"}:
-        return False, "only http/https URLs are allowed"
-    if not parsed.hostname:
-        return False, "URL must include a hostname"
-    return True, ""
-
-
 @mcp.tool()
 def fetch_url(url: str, method: str = "GET", max_bytes: int = _HTTP_MAX_BYTES) -> dict:
     """Fetch an http(s) URL and return status, headers, and a truncated body.
 
     Args:
-        url: Absolute http or https URL.
+        url: Absolute http or https URL. Must resolve to a public IP —
+            loopback/private/link-local/reserved addresses are rejected (SSRF guard).
         method: 'GET' or 'HEAD'. Defaults to 'GET'.
         max_bytes: Cap on the body size returned (default 200 KB, max 1 MB).
+            Streaming stops once this many bytes have been read.
     """
-    ok, reason = _safe_url(url)
-    if not ok:
-        return {"error": reason}
+    try:
+        url = check_url_is_public(url)
+    except ValueError as e:
+        return {"error": str(e)}
     m = method.upper()
     if m not in {"GET", "HEAD"}:
         return {"error": "method must be 'GET' or 'HEAD'"}
@@ -311,23 +320,42 @@ def fetch_url(url: str, method: str = "GET", max_bytes: int = _HTTP_MAX_BYTES) -
             follow_redirects=True,
             headers={"User-Agent": _HTTP_USER_AGENT},
         ) as client:
-            resp = client.request(m, url)
+            with client.stream(m, url) as resp:
+                chunks: list[bytes] = []
+                total = 0
+                truncated = False
+                for chunk in resp.iter_bytes():
+                    if not chunk:
+                        continue
+                    total += len(chunk)
+                    remaining = cap - sum(len(c) for c in chunks)
+                    if remaining <= 0:
+                        truncated = True
+                        break
+                    chunks.append(chunk[:remaining])
+                    if total >= cap:
+                        truncated = True
+                        break
+                body = b"".join(chunks)
+                status = resp.status_code
+                reason = resp.reason_phrase
+                headers = dict(resp.headers)
+                final_url = str(resp.url)
+                encoding = resp.encoding
     except httpx.HTTPError as e:
         return {"error": f"request failed: {e}"}
 
-    body = resp.content[:cap]
-    truncated = len(resp.content) > cap
     try:
-        text = body.decode(resp.encoding or "utf-8", errors="replace")
+        text = body.decode(encoding or "utf-8", errors="replace")
     except LookupError:
         text = body.decode("utf-8", errors="replace")
 
     return {
-        "url": str(resp.url),
-        "status": resp.status_code,
-        "reason": resp.reason_phrase,
-        "headers": dict(resp.headers),
-        "bytes_total": len(resp.content),
+        "url": final_url,
+        "status": status,
+        "reason": reason,
+        "headers": headers,
+        "bytes_total": total,
         "bytes_returned": len(body),
         "truncated": truncated,
         "body": text if m == "GET" else "",

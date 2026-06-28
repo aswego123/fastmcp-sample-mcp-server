@@ -270,6 +270,30 @@ And update your client config to launch the script directly, e.g.:
 }
 ```
 
+## Guardrails
+
+The server applies a small set of defensive checks so a careless (or malicious)
+agent can't trivially hang the process, escape the network sandbox, or fill up
+the database. They live in [server/safety.py](server/safety.py) and are wired
+into the relevant tools.
+
+| Tool | Guardrail | Why |
+| --- | --- | --- |
+| `calculate` | AST-based evaluator instead of `eval()`. Only `+ - * / // % **`, parens, unary +/-, numeric literals. Exponent capped at 100; expression capped at 200 chars. | `eval()` is dangerous even with a charset filter — `9**9**9**9` would peg a CPU core forever. |
+| `fetch_url` | Resolves the hostname and rejects loopback, private (10/8, 172.16/12, 192.168/16), link-local (incl. 169.254/16 cloud metadata), multicast, and reserved IPs. Streams the response and stops after `max_bytes`. | Blocks SSRF and prevents downloading huge files just to truncate them. |
+| `regex_match` | Pattern capped at 1 KB, text at 1 MB, execution wrapped in a 2-second timeout via a worker thread. | Stops catastrophic backtracking (ReDoS) from blocking the server. |
+| `note_add` / `note_update` | Title required, ≤200 chars; body ≤100 KB; both validated at the DB layer. | Prevents one bad call from bloating the SQLite file. |
+
+What's **not** included (yet, by design — this is a local demo):
+
+- No per-tool rate limiting
+- No authentication on the SSE/HTTP transports
+- No output-size cap on tool return values
+- No prompt-injection sanitization on fetched HTML
+
+If you ever expose this beyond `localhost`, add at least auth and rate limits
+before doing so.
+
 ## Run with Docker
 
 ```bash
