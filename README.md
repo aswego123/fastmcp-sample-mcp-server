@@ -444,8 +444,15 @@ The suite (82 tests) covers:
 
   ## Demo Video
 
+  ### Tools calling video
+
   https://github.com/user-attachments/assets/3dacf24b-3717-4b82-a036-e5ff4131bd09
 
-## License
+  ### Telemetry video
 
-[MIT](LICENSE) © 2026 anjalikakkar
+  https://github.com/user-attachments/assets/bef3c491-0edd-4ae0-8619-275eeda11fa6
+
+
+  ## License
+
+  [MIT](LICENSE) © 2026 anjalikakkar
