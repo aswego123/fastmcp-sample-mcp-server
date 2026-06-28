@@ -28,7 +28,7 @@ from .telemetry import traced
 # Server config
 
 SERVER_NAME = "Local MCP Server"
-SERVER_VERSION = "0.4.0"
+SERVER_VERSION = "0.4.1"
 SERVER_START_TIME = datetime.datetime.now(datetime.timezone.utc)
 
 _HTTP_TIMEOUT = 10.0
@@ -412,9 +412,7 @@ def weather(latitude: float, longitude: float) -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
 # Notes — stateful CRUD demo backed by SQLite (see notes_db.py)
-# ---------------------------------------------------------------------------
 
 @tool()
 def note_add(title: str, body: str = "") -> dict:
@@ -456,9 +454,8 @@ def note_delete(note_id: int) -> dict:
     return {"deleted": ok, "id": note_id}
 
 
-# ---------------------------------------------------------------------------
+
 # MCP Resources — read-only data that clients can subscribe to or fetch.
-# ---------------------------------------------------------------------------
 
 @mcp.resource("resource://server/info")
 def resource_server_info() -> dict:
@@ -513,9 +510,7 @@ def resource_telemetry_summary() -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
 # MCP Prompts — reusable prompt templates clients can pick from a menu.
-# ---------------------------------------------------------------------------
 
 @mcp.prompt()
 def summarize_text(text: str, style: str = "concise") -> str:
@@ -551,9 +546,7 @@ def explain_error(error_message: str, context: str = "") -> str:
     )
 
 
-# ---------------------------------------------------------------------------
 # CLI / entrypoint
-# ---------------------------------------------------------------------------
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=f"{SERVER_NAME} v{SERVER_VERSION}")
