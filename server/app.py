@@ -22,11 +22,13 @@ from .safety import (
     run_with_timeout,
     safe_eval_math,
 )
+from .telemetry import get_db as get_telemetry_db
+from .telemetry import traced
 
 # Server config
 
 SERVER_NAME = "Local MCP Server"
-SERVER_VERSION = "0.3.0"
+SERVER_VERSION = "0.4.0"
 SERVER_START_TIME = datetime.datetime.now(datetime.timezone.utc)
 
 _HTTP_TIMEOUT = 10.0
@@ -40,7 +42,18 @@ logger = logging.getLogger("mcp.server")
 mcp = FastMCP(SERVER_NAME)
 notes = NotesDB(NOTES_DB_PATH)
 
-@mcp.tool()
+
+def tool(*args, **kwargs):
+    """Drop-in for ``@mcp.tool()`` that also records telemetry per call.
+
+    Usage stays identical: ``@tool()`` above any function.
+    """
+    def decorator(fn):
+        return mcp.tool(*args, **kwargs)(traced(fn))
+    return decorator
+
+
+@tool()
 def calculate(expression: str) -> str:
     """Evaluate a safe math expression. Example: '2 + 2 * 10'
 
@@ -52,13 +65,13 @@ def calculate(expression: str) -> str:
     except MathError as e:
         return f"Error: {e}"
     return f"{expression} = {result}"
-@mcp.tool()
+@tool()
 def get_server_time() -> str:
     """Returns the current server date and time."""
     now = datetime.datetime.utcnow()
     return f"Server time (UTC): {now.strftime('%Y-%m-%d %H:%M:%S')}"
 
-@mcp.tool()
+@tool()
 def random_number(min_val: int = 1, max_val: int = 100) -> str:
     """Generate a random number between min_val and max_val."""
     if min_val >= max_val:
@@ -66,7 +79,7 @@ def random_number(min_val: int = 1, max_val: int = 100) -> str:
     num = random.randint(min_val, max_val)
     return f"Random number between {min_val} and {max_val}: {num}"
 
-@mcp.tool()
+@tool()
 def analyze_text(text: str) -> dict:
     """Analyze a given text and return word count, char count, and sentences."""
     words = text.split()
@@ -78,7 +91,7 @@ def analyze_text(text: str) -> dict:
         "avg_word_length": round(sum(len(w) for w in words) / len(words), 2) if words else 0
     }
 
-@mcp.tool()
+@tool()
 def echo(message: str) -> str:
     """Echo back a message. Useful for testing connectivity."""
     return f"[MCP Server Echo]: {message}"
@@ -86,7 +99,7 @@ def echo(message: str) -> str:
 
 # Encoding / hashing utilities
 
-@mcp.tool()
+@tool()
 def hash_text(text: str, algorithm: str = "sha256") -> dict:
     """Hash a string with md5, sha1, sha256, or sha512.
 
@@ -102,7 +115,7 @@ def hash_text(text: str, algorithm: str = "sha256") -> dict:
     return {"algorithm": algo, "input_length": len(text), "hex": digest}
 
 
-@mcp.tool()
+@tool()
 def base64_encode(text: str, url_safe: bool = False) -> str:
     """Base64-encode a UTF-8 string. Set url_safe=True for URL-safe alphabet."""
     data = text.encode("utf-8")
@@ -110,7 +123,7 @@ def base64_encode(text: str, url_safe: bool = False) -> str:
     return encoded.decode("ascii")
 
 
-@mcp.tool()
+@tool()
 def base64_decode(data: str, url_safe: bool = False) -> str:
     """Decode a base64 string back to UTF-8 text."""
     try:
@@ -122,7 +135,7 @@ def base64_decode(data: str, url_safe: bool = False) -> str:
 
 # Identifiers & secrets
 
-@mcp.tool()
+@tool()
 def uuid_generate(count: int = 1, version: int = 4) -> dict:
     """Generate one or more UUIDs.
 
@@ -141,7 +154,7 @@ def uuid_generate(count: int = 1, version: int = 4) -> dict:
     return {"version": version, "count": count, "uuids": ids}
 
 
-@mcp.tool()
+@tool()
 def password_generate(
     length: int = 20,
     use_uppercase: bool = True,
@@ -180,7 +193,7 @@ def password_generate(
 
 # JSON & regex helpers
 
-@mcp.tool()
+@tool()
 def json_format(data: str, indent: int = 2, sort_keys: bool = False) -> str:
     """Pretty-print a JSON string. Returns an error message if input isn't valid JSON."""
     if not 0 <= indent <= 8:
@@ -192,7 +205,7 @@ def json_format(data: str, indent: int = 2, sort_keys: bool = False) -> str:
     return json.dumps(parsed, indent=indent, sort_keys=sort_keys, ensure_ascii=False)
 
 
-@mcp.tool()
+@tool()
 def regex_match(pattern: str, text: str, ignore_case: bool = False, multiline: bool = False) -> dict:
     """Find all matches of a regex pattern in text.
 
@@ -247,7 +260,7 @@ _WEIGHT_TO_G = {
 }
 
 
-@mcp.tool()
+@tool()
 def convert_units(value: float, from_unit: str, to_unit: str) -> dict:
     """Convert a numeric value between units.
 
@@ -294,7 +307,7 @@ def convert_units(value: float, from_unit: str, to_unit: str) -> dict:
 
 # Network tools
 
-@mcp.tool()
+@tool()
 def fetch_url(url: str, method: str = "GET", max_bytes: int = _HTTP_MAX_BYTES) -> dict:
     """Fetch an http(s) URL and return status, headers, and a truncated body.
 
@@ -362,7 +375,7 @@ def fetch_url(url: str, method: str = "GET", max_bytes: int = _HTTP_MAX_BYTES) -
     }
 
 
-@mcp.tool()
+@tool()
 def weather(latitude: float, longitude: float) -> dict:
     """Get the current weather for a lat/lon using the free Open-Meteo API (no key needed)."""
     if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
@@ -403,7 +416,7 @@ def weather(latitude: float, longitude: float) -> dict:
 # Notes — stateful CRUD demo backed by SQLite (see notes_db.py)
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@tool()
 def note_add(title: str, body: str = "") -> dict:
     """Create a new note. Returns the saved note including its id and timestamps."""
     try:
@@ -412,21 +425,21 @@ def note_add(title: str, body: str = "") -> dict:
         return {"error": str(e)}
 
 
-@mcp.tool()
+@tool()
 def note_list(limit: int = 50, search: str | None = None) -> dict:
     """List recent notes (newest first). Optional case-insensitive substring search."""
     items = notes.list(limit=limit, search=search)
     return {"count": len(items), "total": notes.count(), "notes": items}
 
 
-@mcp.tool()
+@tool()
 def note_get(note_id: int) -> dict:
     """Fetch a single note by id."""
     note = notes.get(note_id)
     return note if note else {"error": f"note {note_id} not found"}
 
 
-@mcp.tool()
+@tool()
 def note_update(note_id: int, title: str | None = None, body: str | None = None) -> dict:
     """Update a note's title and/or body. At least one of title/body must be given."""
     try:
@@ -436,7 +449,7 @@ def note_update(note_id: int, title: str | None = None, body: str | None = None)
     return updated if updated else {"error": f"note {note_id} not found"}
 
 
-@mcp.tool()
+@tool()
 def note_delete(note_id: int) -> dict:
     """Delete a note by id."""
     ok = notes.delete(note_id)
@@ -478,6 +491,26 @@ def resource_note(note_id: str) -> dict:
         return {"error": f"invalid note id: {note_id!r}"}
     note = notes.get(nid)
     return note if note else {"error": f"note {nid} not found"}
+
+
+@mcp.resource("resource://telemetry/recent")
+def resource_telemetry_recent() -> dict:
+    """Last 100 recorded tool calls (newest first)."""
+    db = get_telemetry_db()
+    return {"calls": db.recent(limit=100)}
+
+
+@mcp.resource("resource://telemetry/summary")
+def resource_telemetry_summary() -> dict:
+    """Aggregate metrics: last 60 min summary + per-tool counts for last 24 h."""
+    db = get_telemetry_db()
+    return {
+        "summary_60m": db.summary(since_minutes=60),
+        "per_tool_24h": db.per_tool_counts(since_minutes=1440),
+        "slowest_24h": db.slowest(limit=10, since_minutes=1440),
+        "recent_errors": db.recent_errors(limit=20),
+        "total_recorded": db.count(),
+    }
 
 
 # ---------------------------------------------------------------------------

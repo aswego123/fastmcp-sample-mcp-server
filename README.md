@@ -59,11 +59,13 @@ sample-mcp-server-script/
 
 ## Resources exposed
 
-| URI                          | Description                                              |
-| ---------------------------- | -------------------------------------------------------- |
-| `resource://server/info`     | Server metadata: name, version, uptime, notes count.     |
-| `resource://notes/all`       | All notes (max 500), newest first.                       |
-| `resource://notes/{note_id}` | A single note by id, e.g. `resource://notes/3`.          |
+| URI                            | Description                                              |
+| ------------------------------ | -------------------------------------------------------- |
+| `resource://server/info`       | Server metadata: name, version, uptime, notes count.     |
+| `resource://notes/all`         | All notes (max 500), newest first.                       |
+| `resource://notes/{note_id}`   | A single note by id, e.g. `resource://notes/3`.          |
+| `resource://telemetry/recent`  | Last 100 tool calls (tool, ts, duration_ms, status).     |
+| `resource://telemetry/summary` | Aggregates: 60-min KPIs + 24-h per-tool counts.          |
 
 ## Prompts exposed
 
@@ -269,6 +271,34 @@ And update your client config to launch the script directly, e.g.:
   }
 }
 ```
+
+## Telemetry
+
+Every tool call is recorded to a local SQLite file (`data/telemetry.db` by
+default) via the `@traced` decorator in [server/telemetry.py](server/telemetry.py).
+Per call we store: **timestamp, tool name, duration in ms, and status (`ok`
+or `error`)** — and the exception message when something raises. We deliberately
+**do not** record arguments or return values to keep secrets, tokens, hashed
+inputs, password outputs, etc. out of the telemetry DB.
+
+Tool-level failures returned as `{"error": "..."}` count as `ok` (they are a
+normal Python return); only uncaught exceptions are recorded as `error`.
+
+Toggle via env vars:
+
+| Variable             | Default              | Meaning                                  |
+| -------------------- | -------------------- | ---------------------------------------- |
+| `MCP_TELEMETRY`      | `1`                  | Set to `0` to disable recording.         |
+| `MCP_TELEMETRY_DB`   | `data/telemetry.db`  | Path to the telemetry SQLite file.       |
+
+The Streamlit UI has a **📊 Telemetry** tab that pulls
+`resource://telemetry/summary` and `resource://telemetry/recent` and renders:
+KPI cards (calls, error rate, avg + **p50 / p95 / p99** latency), a Plotly
+bar chart of calls per tool (last 24 h), **slowest-calls** and **recent-errors**
+tables side-by-side, a latency scatter over time, and a filterable
+recent-calls table. An **auto-refresh (5 s)** checkbox keeps it live, and the
+Tool caller tab shows a per-tool "called N times, avg X ms" badge under the
+description.
 
 ## Guardrails
 
