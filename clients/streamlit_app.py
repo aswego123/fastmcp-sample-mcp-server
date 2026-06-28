@@ -15,8 +15,10 @@ import json
 from datetime import datetime
 from typing import Any
 
+import plotly.express as px
 import streamlit as st
 from fastmcp import Client
+from streamlit_autorefresh import st_autorefresh
 
 DEFAULT_URL = "http://localhost:8000/sse"
 
@@ -40,6 +42,24 @@ async def _list_tools(url: str) -> list[Any]:
 async def _call_tool(url: str, name: str, args: dict) -> Any:
     async with Client(url) as c:
         return await c.call_tool(name, args)
+
+
+async def _read_resource(url: str, uri: str) -> Any:
+    async with Client(url) as c:
+        return await c.read_resource(uri)
+
+
+def _resource_to_dict(result: Any) -> dict | list | None:
+    """Parse the first text block of a read_resource result into JSON."""
+    items = result if isinstance(result, list) else getattr(result, "contents", None) or [result]
+    for block in items:
+        text = getattr(block, "text", None)
+        if text:
+            try:
+                return json.loads(text)
+            except (json.JSONDecodeError, TypeError):
+                return {"raw": text}
+    return None
 
 
 def _result_payload(result) -> Any:
@@ -216,68 +236,238 @@ if not st.session_state.tools:
     st.info("Click **Connect / Refresh** in the sidebar to load tools from the server.")
     st.stop()
 
-tool_names = [t.name for t in st.session_state.tools]
-selected_name = st.selectbox("Tool", tool_names, key="tool_picker")
-selected_tool = next(t for t in st.session_state.tools if t.name == selected_name)
 
-if selected_tool.description:
-    st.markdown(f"**Description:** {selected_tool.description}")
+# Shared helper used by both tabs to load (and cache) the telemetry snapshot.
+def _fetch_telemetry(url: str) -> dict | None:
+    try:
+        summary_raw = _run(_read_resource(url, "resource://telemetry/summary"))
+        recent_raw = _run(_read_resource(url, "resource://telemetry/recent"))
+        return {
+            "summary": _resource_to_dict(summary_raw) or {},
+            "recent": (_resource_to_dict(recent_raw) or {}).get("calls", []),
+            "fetched_at": datetime.now().isoformat(timespec="seconds"),
+        }
+    except Exception:  # noqa: BLE001
+        return None
 
-with st.expander("Input schema", expanded=False):
-    st.json(getattr(selected_tool, "inputSchema", {}) or {})
 
-st.subheader("Arguments")
-args = render_form(selected_tool, key_prefix=selected_name)
+def _per_tool_stats(data: dict | None, tool: str) -> dict | None:
+    if not data:
+        return None
+    for row in data.get("summary", {}).get("per_tool_24h", []) or []:
+        if row.get("tool") == tool:
+            return row
+    return None
 
-call_clicked = st.button("Call tool", type="primary", disabled=args is None)
 
-if call_clicked and args is not None:
-    with st.spinner(f"Calling `{selected_name}`…"):
-        try:
-            result = _run(_call_tool(st.session_state.server_url, selected_name, args))
-            payload = _result_payload(result)
-            entry = {
-                "ts": datetime.now().isoformat(timespec="seconds"),
-                "tool": selected_name,
-                "args": args,
-                "ok": not _is_error(result),
-                "result": payload,
-            }
-        except Exception as e:  # noqa: BLE001
-            entry = {
-                "ts": datetime.now().isoformat(timespec="seconds"),
-                "tool": selected_name,
-                "args": args,
-                "ok": False,
-                "result": f"Error: {e}",
-            }
-        st.session_state.history.insert(0, entry)
+tab_tools, tab_telemetry = st.tabs(["🔧 Tool caller", "📊 Telemetry"])
+
+with tab_tools:
+    tool_names = [t.name for t in st.session_state.tools]
+    selected_name = st.selectbox("Tool", tool_names, key="tool_picker")
+    selected_tool = next(t for t in st.session_state.tools if t.name == selected_name)
+
+    if selected_tool.description:
+        st.markdown(f"**Description:** {selected_tool.description}")
+
+    # Per-tool telemetry badge (best-effort; silently skips if telemetry unreachable)
+    stats = _per_tool_stats(st.session_state.get("telemetry_data"), selected_name)
+    if stats:
+        err = stats.get("errors", 0)
+        avg = stats.get("avg_ms", 0.0) or 0.0
+        badge = f"📈 called **{stats['calls']}** times in last 24 h · avg **{avg:.1f} ms**"
+        if err:
+            badge += f" · ❌ **{err}** error(s)"
+        st.caption(badge)
+
+    with st.expander("Input schema", expanded=False):
+        st.json(getattr(selected_tool, "inputSchema", {}) or {})
+
+    st.subheader("Arguments")
+    args = render_form(selected_tool, key_prefix=selected_name)
+
+    call_clicked = st.button("Call tool", type="primary", disabled=args is None)
+
+    if call_clicked and args is not None:
+        with st.spinner(f"Calling `{selected_name}`…"):
+            try:
+                result = _run(_call_tool(st.session_state.server_url, selected_name, args))
+                payload = _result_payload(result)
+                entry = {
+                    "ts": datetime.now().isoformat(timespec="seconds"),
+                    "tool": selected_name,
+                    "args": args,
+                    "ok": not _is_error(result),
+                    "result": payload,
+                }
+            except Exception as e:  # noqa: BLE001
+                entry = {
+                    "ts": datetime.now().isoformat(timespec="seconds"),
+                    "tool": selected_name,
+                    "args": args,
+                    "ok": False,
+                    "result": f"Error: {e}",
+                }
+            st.session_state.history.insert(0, entry)
+
+    if st.session_state.history:
+        latest = st.session_state.history[0]
+        st.subheader("Result")
+        if latest["ok"]:
+            st.success(f"`{latest['tool']}` succeeded at {latest['ts']}")
+        else:
+            st.error(f"`{latest['tool']}` failed at {latest['ts']}")
+        if isinstance(latest["result"], (dict, list)):
+            st.json(latest["result"])
+        else:
+            st.code(str(latest["result"]))
+
+        with st.expander(f"History ({len(st.session_state.history)})", expanded=False):
+            for entry in st.session_state.history:
+                status = "✅" if entry["ok"] else "❌"
+                st.markdown(f"{status} **{entry['tool']}** — {entry['ts']}")
+                st.caption("args:")
+                st.json(entry["args"])
+                st.caption("result:")
+                if isinstance(entry["result"], (dict, list)):
+                    st.json(entry["result"])
+                else:
+                    st.code(str(entry["result"]))
+                st.divider()
+
 
 # ---------------------------------------------------------------------------
-# Result / history
+# Telemetry tab — server-side stats pulled from resource://telemetry/*
 # ---------------------------------------------------------------------------
 
-if st.session_state.history:
-    latest = st.session_state.history[0]
-    st.subheader("Result")
-    if latest["ok"]:
-        st.success(f"`{latest['tool']}` succeeded at {latest['ts']}")
-    else:
-        st.error(f"`{latest['tool']}` failed at {latest['ts']}")
-    if isinstance(latest["result"], (dict, list)):
-        st.json(latest["result"])
-    else:
-        st.code(str(latest["result"]))
+with tab_telemetry:
+    st.subheader("Server telemetry")
+    st.caption(
+        "Live data from `resource://telemetry/summary` and `resource://telemetry/recent`. "
+        "Records tool name, duration, and ok/error status — no arguments or results are stored."
+    )
 
-    with st.expander(f"History ({len(st.session_state.history)})", expanded=False):
-        for entry in st.session_state.history:
-            status = "✅" if entry["ok"] else "❌"
-            st.markdown(f"{status} **{entry['tool']}** — {entry['ts']}")
-            st.caption("args:")
-            st.json(entry["args"])
-            st.caption("result:")
-            if isinstance(entry["result"], (dict, list)):
-                st.json(entry["result"])
+    top_l, top_m, top_r = st.columns([1, 1, 1])
+    refresh = top_l.button("🔄 Refresh telemetry", type="primary")
+    auto_refresh = top_m.checkbox("Auto-refresh (5 s)", value=False, key="tel_autorefresh")
+    window_min = top_r.selectbox(
+        "Summary window",
+        options=[15, 60, 360, 1440],
+        index=1,
+        format_func=lambda m: f"last {m} min" if m < 1440 else "last 24 h",
+        key="tel_window",
+    )
+
+    if auto_refresh:
+        st_autorefresh(interval=5000, key="telemetry_autorefresh")
+
+    if refresh or auto_refresh or "telemetry_data" not in st.session_state:
+        snap = _fetch_telemetry(st.session_state.server_url)
+        if snap is None:
+            st.error("Could not load telemetry — is the server running?")
+        st.session_state.telemetry_data = snap
+
+    data = st.session_state.get("telemetry_data")
+    if not data:
+        st.info("No telemetry loaded yet. Click **Refresh telemetry** above.")
+    else:
+        st.caption(f"Last refreshed at {data['fetched_at']}")
+        summary = data["summary"].get("summary_60m", {}) or {}
+        per_tool = data["summary"].get("per_tool_24h", []) or []
+        slowest = data["summary"].get("slowest_24h", []) or []
+        errors_list = data["summary"].get("recent_errors", []) or []
+        recent = data["recent"]
+
+        # Top-line KPIs
+        total = summary.get("total", 0)
+        errors = summary.get("errors", 0)
+        avg_ms = summary.get("avg_ms", 0.0)
+        err_rate = (errors / total * 100) if total else 0.0
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Calls (last 60 min)", f"{total}")
+        c2.metric("Errors", f"{errors}", delta=f"{err_rate:.1f}% rate", delta_color="inverse")
+        c3.metric("Avg duration", f"{avg_ms:.1f} ms")
+        c4.metric("Total recorded", f"{data['summary'].get('total_recorded', 0):,}")
+
+        # Latency percentiles
+        p1, p2, p3, p4 = st.columns(4)
+        p1.metric("p50 latency", f"{summary.get('p50_ms', 0.0):.1f} ms")
+        p2.metric("p95 latency", f"{summary.get('p95_ms', 0.0):.1f} ms")
+        p3.metric("p99 latency", f"{summary.get('p99_ms', 0.0):.1f} ms")
+        p4.metric("max", f"{summary.get('max_ms', 0.0):.1f} ms")
+
+        st.divider()
+
+        # Per-tool bar chart (last 24 h)
+        if per_tool:
+            st.markdown("**Calls per tool — last 24 h**")
+            fig = px.bar(
+                per_tool,
+                x="tool",
+                y="calls",
+                color="errors",
+                color_continuous_scale="Reds",
+                hover_data=["avg_ms"],
+                labels={"tool": "Tool", "calls": "Calls", "errors": "Errors"},
+            )
+            fig.update_layout(height=350, margin=dict(l=0, r=0, t=10, b=0))
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No tool calls recorded yet.")
+
+        # Slowest calls + recent errors side-by-side
+        sl_col, err_col = st.columns(2)
+        with sl_col:
+            st.markdown("**🐢 Slowest calls — last 24 h**")
+            if slowest:
+                st.dataframe(
+                    [
+                        {"ts": r["ts"], "tool": r["tool"], "ms": round(r["duration_ms"], 1), "status": r["status"]}
+                        for r in slowest
+                    ],
+                    use_container_width=True,
+                    hide_index=True,
+                )
             else:
-                st.code(str(entry["result"]))
-            st.divider()
+                st.caption("No data yet.")
+        with err_col:
+            st.markdown("**❌ Recent errors**")
+            if errors_list:
+                st.dataframe(
+                    [
+                        {"ts": r["ts"], "tool": r["tool"], "ms": round(r["duration_ms"], 1), "error": r["error"]}
+                        for r in errors_list
+                    ],
+                    use_container_width=True,
+                    hide_index=True,
+                )
+            else:
+                st.caption("No errors recorded. 🎉")
+
+        # Latency over time
+        if recent:
+            st.markdown(f"**Recent calls — latency over time (last {len(recent)})**")
+            fig2 = px.scatter(
+                recent,
+                x="ts",
+                y="duration_ms",
+                color="status",
+                hover_data=["tool", "error"],
+                color_discrete_map={"ok": "#10b981", "error": "#ef4444"},
+                labels={"ts": "Timestamp", "duration_ms": "Duration (ms)"},
+            )
+            fig2.update_layout(height=300, margin=dict(l=0, r=0, t=10, b=0))
+            st.plotly_chart(fig2, use_container_width=True)
+
+            # Filterable table
+            st.markdown("**Recent calls**")
+            f_l, f_r = st.columns([1, 1])
+            tools_in_data = sorted({r["tool"] for r in recent})
+            tool_filter = f_l.selectbox("Filter tool", ["(all)"] + tools_in_data, key="tel_tool")
+            status_filter = f_r.selectbox("Filter status", ["(all)", "ok", "error"], key="tel_status")
+            filtered = [
+                r for r in recent
+                if (tool_filter == "(all)" or r["tool"] == tool_filter)
+                and (status_filter == "(all)" or r["status"] == status_filter)
+            ]
+            st.dataframe(filtered, use_container_width=True, hide_index=True)

@@ -39,3 +39,10 @@ python -m clients.cli call note_delete --args '{"note_id": 2}'
 source .venv/bin/activate
 streamlit run clients/streamlit_app.py
 
+-----------------------------------------------------
+
+## Testing - smoke testing_server
+
+# terminal 3 — generate traffic
+for i in {1..30}; do python -m clients.cli smoke; done
+
